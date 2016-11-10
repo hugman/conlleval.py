@@ -9,12 +9,20 @@
 # - LaTeX output (-l argument) not supported
 # - raw tags (-r argument) not supported
 
+## Modified by Hugman Sangkeun Jung
+## 
+## This is modified version of original conlleval.py to be 
+##   - support utf-8 
+##   - support program level python api
+##
+##   - default sentence boundary is changed to '^$'
+##   - default field boundary is changed to '\t'
+
+
 import sys
 import re
 
 from collections import defaultdict, namedtuple
-
-ANY_SPACE = '<SPACE>'
 
 class FormatError(Exception):
     pass
@@ -34,29 +42,15 @@ class EvalCounts(object):
         self.t_found_correct = defaultdict(int)
         self.t_found_guessed = defaultdict(int)
 
-def parse_args(argv):
-    import argparse
-    parser = argparse.ArgumentParser(
-        description='evaluate tagging results using CoNLL criteria',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    arg = parser.add_argument
-    arg('-b', '--boundary', metavar='STR', default='-X-',
-        help='sentence boundary')
-    arg('-d', '--delimiter', metavar='CHAR', default=ANY_SPACE,
-        help='character delimiting items in input')
-    arg('-o', '--otag', metavar='CHAR', default='O',
-        help='alternative outside tag')
-    arg('file', nargs='?', default=None)
-    return parser.parse_args(argv)
 
 def parse_tag(t):
     m = re.match(r'^([^-]*)-(.*)$', t)
     return m.groups() if m else (t, '')
 
-def evaluate(iterable, options=None):
-    if options is None:
-        options = parse_args([])    # use defaults
+def evaluate(iterable, 
+             delimiter = '\t',
+             boundary  = r'^$'  # regular expression
+            ):
 
     counts = EvalCounts()
     num_features = None       # number of features per line
@@ -65,32 +59,22 @@ def evaluate(iterable, options=None):
     last_correct_type = ''    # type of previously identified chunk tag
     last_guessed = 'O'        # previously identified chunk tag
     last_guessed_type = ''    # type of previous chunk tag in corpus
+    boundary_symbol = '-X-'
 
     for line in iterable:
         line = line.rstrip('\r\n')
 
-        if options.delimiter == ANY_SPACE:
-            features = line.split()
-        else:
-            features = line.split(options.delimiter)
+        is_sent_boundary = True if re.match(boundary, line) else False
+        features = line.split(delimiter)
 
-        if num_features is None:
-            num_features = len(features)
-        elif num_features != len(features) and len(features) != 0:
-            raise FormatError('unexpected number of features: %d (%d)' %
-                              (len(features), num_features))
-
-        if len(features) == 0 or features[0] == options.boundary:
-            features = [options.boundary, 'O', 'O']
-        if len(features) < 3:
-            raise FormatError('unexpected number of features in line %s' % line)
+        if is_sent_boundary:
+            features = [boundary_symbol, 'O', 'O']
 
         guessed, guessed_type = parse_tag(features.pop())
         correct, correct_type = parse_tag(features.pop())
         first_item = features.pop(0)
 
-        if first_item == options.boundary:
-            guessed = 'O'
+        if first_item == boundary_symbol: guessed = 'O'
 
         end_correct = end_of_chunk(last_correct, correct,
                                    last_correct_type, correct_type)
@@ -119,7 +103,7 @@ def evaluate(iterable, options=None):
         if start_guessed:
             counts.found_guessed += 1
             counts.t_found_guessed[guessed_type] += 1
-        if first_item != options.boundary:
+        if first_item != boundary_symbol:
             if correct == guessed and guessed_type == correct_type:
                 counts.correct_tags += 1
             counts.token_counter += 1
@@ -158,11 +142,55 @@ def metrics(counts):
         )
     return overall, by_type
 
+def get_metrics(counts):
+    overall, by_type = metrics(counts)
+    c = counts
+    result = {}
+    result['overall_info'] = {
+                                'number_of_tokens': c.token_counter,
+                                'number_of_correct_phrase': c.found_correct,
+                                'number_of_guessed_phrase' : c.found_guessed,
+                                'number_of_correct_guessed_phrase': c.correct_chunk,
+
+                                'accuracy' : (100.*c.correct_tags/c.token_counter),
+                                'precision' : (100.*overall.prec),
+                                'recall' : (100.*overall.rec),
+                                'f_measure' : (100.*overall.fscore)
+                             }
+
+    result['per_class'] = {}
+    for i, m in sorted(by_type.items()):
+        result['per_class'][ i ] = {
+                                        'precision' : (100.*m.prec),
+                                        'recall' : (100.*m.rec),
+                                        'f_measure' : (100.*m.fscore),
+                                        'number_of_guessed_tokens' : c.t_found_guessed[i],
+                                    }
+    return result
+
+
 def report(counts, out=None):
     if out is None:
         out = sys.stdout
 
     overall, by_type = metrics(counts)
+
+    result = {}
+
+    result['overall_info'] = {
+                                'number_of_tokens': c.token_counter,
+                                'number_of_correct_phrase': c.found_correct,
+                                'number_of_guessed_phrase' : c.found_guessed,
+                                'number_of_correct_guessed_phrase': c.correct_chunk,
+
+                                'accuracy' : (100.*c.correct_tags/c.token_counter),
+                                'precision' : (100.*overall.prec),
+                                'recall' : (100.*overall.rec),
+                                'f_measure' : (100.*overall.fscore)
+                             }
+
+    result['per_class'] = {}
+
 
     c = counts
     out.write('processed %d tokens with %d phrases; ' %
@@ -182,6 +210,14 @@ def report(counts, out=None):
         out.write('precision: %6.2f%%; ' % (100.*m.prec))
         out.write('recall: %6.2f%%; ' % (100.*m.rec))
         out.write('FB1: %6.2f  %d\n' % (100.*m.fscore, c.t_found_guessed[i]))
+
+        result['per_class'][ i ] = {
+                                        'precision' : (100.*m.prec),
+                                        'recall' : (100.*m.rec),
+                                        'f_measure' : (100.*m.fscore, c.t_found_guessed[i]),
+                                    }
+
+    return result
 
 def end_of_chunk(prev_tag, tag, prev_type, type_):
     # check if a chunk ended between the previous and current word
@@ -231,15 +267,16 @@ def start_of_chunk(prev_tag, tag, prev_type, type_):
 
     return chunk_start
 
-def main(argv):
-    args = parse_args(argv[1:])
+def measure_performance(fn):
+    with codecs.open(fn, encoding='utf-8') as f:
+        counts = evaluate(f)
+        return get_metrics(counts)
 
-    if args.file is None:
-        counts = evaluate(sys.stdin, args)
-    else:
-        with open(args.file) as f:
-            counts = evaluate(f, args)
-    report(counts)
 
+## test ##
+import codecs
+import os 
+print os.path.dirname(os.path.realpath(__file__))
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
+    measure_performance('__out.txt') # __out.txt is just sample 
+
