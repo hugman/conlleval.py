@@ -1,14 +1,11 @@
 # conlleval.py
 
-Python version of the evaluation script from CoNLL'00-
+conlleval.py is originally contributed by spyysalo. 
+The original code has some limitations. 
+ - not support utf-8 (especially CJK)
+ - not support program level Python API
+ 
+This forked version is just re-factored version of the original. 
 
-Original (perl): http://www.cnts.ua.ac.be/conll2000/chunking/conlleval.txt
-
-Intentional differences:
-
-- IOBES support
-- accept any space as delimiter by default
-- optional file argument (default STDIN)
-- option to set boundary (-b argument)
-- LaTeX output (-l argument) not supported
-- raw tags (-r argument) not supported
+Check original connlleval.py at [here](https://github.com/spyysalo/conlleval.py)
+ 
