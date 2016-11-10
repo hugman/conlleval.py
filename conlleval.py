@@ -267,9 +267,10 @@ def start_of_chunk(prev_tag, tag, prev_type, type_):
 
     return chunk_start
 
-def measure_performance(fn):
+import codecs
+def measure_performance(fn,  delimiter='\t', boundary=r'^$'):
     with codecs.open(fn, encoding='utf-8') as f:
-        counts = evaluate(f)
+        counts = evaluate(f, delimiter=delimiter, boundary=boundary)
         return get_metrics(counts)
 
 
@@ -278,5 +279,5 @@ import codecs
 import os 
 print os.path.dirname(os.path.realpath(__file__))
 if __name__ == '__main__':
-    measure_performance('__out.txt') # __out.txt is just sample 
+    print measure_performance('__out.txt') # __out.txt is just sample 
 
